@@ -456,3 +456,61 @@ class TestBypassWithBotnameSuffix:
         )
         assert any("handled:stop" in r for r in adapter.sent_responses)
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text', ['/mode status', '/mode invalid', 'Use heavy mode.'])
+async def test_mode_nontransition_preserves_live_task_and_pending(text):
+    adapter = _make_adapter()
+    sk = _session_key()
+    guard = asyncio.Event()
+    adapter._active_sessions[sk] = guard
+    task = asyncio.create_task(asyncio.Event().wait())
+    adapter._session_tasks[sk] = task
+    followup = _make_event('keep this followup')
+    adapter._pending_messages[sk] = followup
+    try:
+        await adapter.handle_message(_make_event(text))
+        assert not task.done()
+        assert adapter._active_sessions[sk] is guard
+        assert adapter._pending_messages[sk] is followup
+        assert any('handled:mode' in r for r in adapter.sent_responses)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_mode_transition_cancels_old_task_and_drains_followup_once():
+    adapter = _make_adapter()
+    sk = _session_key()
+    adapter._active_sessions[sk] = asyncio.Event()
+    task = asyncio.create_task(asyncio.Event().wait())
+    adapter._session_tasks[sk] = task
+    followup = _make_event('continue after mode switch')
+    adapter._pending_messages[sk] = followup
+    async def handler(event):
+        event._mode_rotated = True
+        return 'mode changed'
+    adapter._message_handler = handler
+    drained = []
+    adapter._start_session_processing = lambda event, key: drained.append((event, key))
+    await adapter.handle_message(_make_event('/mode heavy'))
+    assert task.cancelled()
+    assert drained == [(followup, sk)]
+    assert sk not in adapter._active_sessions
+
+
+@pytest.mark.asyncio
+async def test_mode_status_does_not_restore_finished_task_guard():
+    adapter = _make_adapter()
+    sk = _session_key()
+    adapter._active_sessions[sk] = asyncio.Event()
+    task = asyncio.create_task(asyncio.sleep(0))
+    adapter._session_tasks[sk] = task
+    async def handler(event):
+        await task
+        return 'status'
+    adapter._message_handler = handler
+    await adapter.handle_message(_make_event('/mode status'))
+    assert sk not in adapter._active_sessions
