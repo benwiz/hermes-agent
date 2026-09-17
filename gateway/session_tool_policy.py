@@ -41,9 +41,14 @@ def channel_efficiency(runner, config, source):
 
 
 def pin_efficiency(store, session_key, session_id, settings):
-    policy = store.get_session_metadata(session_key, "efficiency_policy")
-    if not isinstance(policy, dict) or policy.get("session_id") != session_id:
-        policy = {"session_id": session_id, "settings": settings}
+    """Snapshot operational budgets for this turn, not for the conversation.
+
+    Unlike tool schemas, these limits are not part of the cached prompt. Refresh
+    them before each turn so correcting a limit also fixes resumed sessions,
+    without resetting history or changing an in-flight turn's budget.
+    """
+    policy = {"session_id": session_id, "settings": dict(settings)}
+    if store.get_session_metadata(session_key, "efficiency_policy") != policy:
         if not store.set_session_metadata(session_key, "efficiency_policy", policy):
             raise RuntimeError("Could not persist session efficiency policy")
     return dict(policy["settings"])
