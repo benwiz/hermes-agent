@@ -10,6 +10,46 @@ from gateway.session_routing import resolve_policy, pin_model_route, pin_schema
 from gateway.session_tool_policy import channel_toolsets, channel_efficiency, pin_session_policy
 
 
+def test_turn_budget_updates_without_rotating_or_changing_tools(tmp_path):
+    from agent.efficiency import admit_request, settings, start_turn, stop_watchdog
+    from gateway.session_tool_policy import pin_efficiency
+
+    config = GatewayConfig()
+    store = SessionStore(tmp_path / "sessions", config)
+    source = SessionSource(platform=Platform.DISCORD, chat_id="project")
+    entry = store.get_or_create_session(source)
+    key, sid = entry.session_key, entry.session_id
+    tool_policy = pin_session_policy(store, key, sid, ["file"], None)
+    limited = settings({"agent": {"efficiency": {"checkpoint_model_calls": 2}}})
+    pin_efficiency(store, key, sid, limited)
+
+    # A resumed conversation must not keep the old forced checkpoint forever.
+    store = SessionStore(tmp_path / "sessions", config)
+    unlimited = settings({"agent": {"efficiency": {"receipts": True}}})
+    agent = SimpleNamespace(_efficiency_settings=pin_efficiency(store, key, sid, unlimited))
+    start_turn(agent)
+    try:
+        for _ in range(10):
+            admit_request(agent, [])
+        assert agent._efficiency_turn.stop_reason is None
+    finally:
+        stop_watchdog(agent)
+    assert store.get_or_create_session(source).session_id == sid
+    assert pin_session_policy(store, key, sid, ["browser"], None) == tool_policy
+    assert store.get_session_metadata(key, "efficiency_policy")["settings"] == unlimited
+
+    # Explicit operator limits still apply on the next turn.
+    agent._efficiency_settings = pin_efficiency(store, key, sid, limited)
+    start_turn(agent)
+    try:
+        admit_request(agent, [])
+        admit_request(agent, [])
+        with pytest.raises(InterruptedError, match="continuation_required"):
+            admit_request(agent, [])
+    finally:
+        stop_watchdog(agent)
+
+
 def test_tiers_fail_closed_and_keep_resumed_capabilities(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     config = {"tools": {"tool_search": False}, "session_routing": {"discord": {
