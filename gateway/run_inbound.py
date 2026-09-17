@@ -1191,6 +1191,8 @@ class GatewayInboundMixin:
         """Handle an incoming message from any platform: auth → command check → running-agent
         interrupt → get/create session → build context → run agent → return response."""
         from gateway.run import _AGENT_PENDING_SENTINEL
+        from gateway.session_mode import normalize_mode_control, recover_before_turn, transition_lock
+        normalize_mode_control(event)
         _admitted = await self._hm_admit_event(event)
         if _admitted is None:
             return None
@@ -1243,24 +1245,28 @@ class GatewayInboundMixin:
                     "please resend shortly."
                 )
 
-        # Claim this session before any await: many awaits sit between here and _run_agent
-        # registering the real AIAgent; without this sentinel a second message during any of them
-        # passes the "already running" guard and spins up a duplicate agent for the same session.
-        _active_session_lease, _limit_message = self._claim_active_session_slot(_quick_key, source)
-        if _limit_message is not None:
-            logger.info("Rejecting new active session %s: max_concurrent_sessions reached", _quick_key)
-            return _limit_message
+        async with transition_lock(self, source):
+            # Recheck after a concurrent mode transition yielded during reset.
+            if self._is_session_running(_quick_key):
+                return await self._hm_handle_running_session_message(event, source, _quick_key)
+            await recover_before_turn(self, event)
+            # Claim this session before any await: many awaits sit between here and _run_agent
+            # registering the real AIAgent; without this sentinel a second message during any of them
+            # passes the "already running" guard and spins up a duplicate agent for the same session.
+            _active_session_lease, _limit_message = self._claim_active_session_slot(_quick_key, source)
+            if _limit_message is not None:
+                logger.info("Rejecting new active session %s: max_concurrent_sessions reached", _quick_key)
+                return _limit_message
 
-        event, source, is_internal = self._hm_rescue_orphaned_fifo(event, source, is_internal, _quick_key)
+            event, source, is_internal = self._hm_rescue_orphaned_fifo(event, source, is_internal, _quick_key)
 
-        _claim_state = self._session_state(_quick_key)
-        if _active_session_lease is not None:
-            _claim_state.turn.lease = _active_session_lease
-        _claim_state.turn.agent = _AGENT_PENDING_SENTINEL
-        _claim_state.turn.started_ts = time.time()
-        self._persist_active_agents()
-        _run_generation = self._begin_session_run_generation(_quick_key)
-
+            _claim_state = self._session_state(_quick_key)
+            if _active_session_lease is not None:
+                _claim_state.turn.lease = _active_session_lease
+            _claim_state.turn.agent = _AGENT_PENDING_SENTINEL
+            _claim_state.turn.started_ts = time.time()
+            self._persist_active_agents()
+            _run_generation = self._begin_session_run_generation(_quick_key)
         try:
             try:
                 _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)

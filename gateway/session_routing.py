@@ -4,7 +4,7 @@ from fnmatch import fnmatchcase
 from gateway.config import ChannelOverride
 
 
-def resolve_policy(runner, config, source):
+def resolve_policy(runner, config, source, *, ignore_saved=False):
     from gateway.run import _get_channel_override
     explicit = _get_channel_override(runner.config, source.platform, source.chat_id,
         thread_id=source.thread_id, parent_id=source.parent_chat_id)
@@ -24,7 +24,7 @@ def resolve_policy(runner, config, source):
     key = runner._session_key_for_source(source)
     entry = runner.session_store.get_or_create_session(source)
     mode = runner.session_store.get_session_metadata(key, "session_mode")
-    if isinstance(mode, dict) and mode.get("session_id") == entry.session_id:
+    if not ignore_saved and isinstance(mode, dict) and mode.get("session_id") == entry.session_id:
         requested = mode["tier"]
         if explicit and explicit.allowed_tiers is not None and requested not in explicit.allowed_tiers:
             raise ValueError("Requested mode is not allowed in this channel")

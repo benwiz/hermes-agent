@@ -3602,7 +3602,11 @@ class BasePlatformAdapter(ABC):
             # Send BEFORE cancelling so cancellation side effects can't drop the "/new"
             # confirmation.
             await self._dispatch_inline_reply(event, log_cmd=cmd)
-            await self.cancel_session_processing(session_key, release_guard=False, discard_pending=False)
+            if cmd != "mode" or getattr(event, "_mode_rotated", False):
+                await self.cancel_session_processing(session_key, release_guard=False, discard_pending=False)
+            elif current_guard is not None and session_key in self._session_tasks and not self._session_task_is_stale(session_key):
+                self._active_sessions[session_key] = current_guard
+                return
         except Exception:
             # On failure restore the original guard so the session isn't left half-reset.
             if self._active_sessions.get(session_key) is command_guard:
@@ -3630,6 +3634,8 @@ class BasePlatformAdapter(ABC):
                 )
             return
 
+        from gateway.session_mode import normalize_mode_control
+        normalize_mode_control(event)
         if event.allow_gateway_control:
             coerce_plaintext_gateway_command(event)
         expected_session_key = str((event.metadata or {}).get("gateway_session_key") or "").strip()
@@ -3667,8 +3673,9 @@ class BasePlatformAdapter(ABC):
         if should_bypass_active_session(cmd):
             try:
                 # /stop, /new, /reset: cancel + response + drain; other bypasses don't cancel.
-                if cmd and is_interrupt_then_dispatch(cmd):
-                    self._discard_text_debounce(session_key)
+                if cmd and (is_interrupt_then_dispatch(cmd) or cmd == "mode"):
+                    if cmd != "mode":
+                        self._discard_text_debounce(session_key)
                     await self._dispatch_active_session_command(event, session_key, cmd)
                 else:
                     logger.debug("[%s] Command '/%s' bypassing active-session guard for %s",
