@@ -112,6 +112,10 @@ def _strip_resume_name(parts: list[str]) -> str:
 class GatewaySessionCommandsMixin:
     """Session-transcript slash commands (/new, /resume, /sessions, /branch, /title, /save, /undo, /retry, /topic, /compress)."""
 
+    async def _handle_mode_command(self, event):
+        from gateway.session_mode import handle_mode
+        return await handle_mode(self, event)
+
     # ------------------------------------------------------------------ /new, /reset
 
     async def _cleanup_old_agent_for_reset(self, session_key: str) -> None:

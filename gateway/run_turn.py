@@ -2155,7 +2155,8 @@ class GatewayTurnMixin:
         from agent.skill_utils import parse_config_string_list
         enabled = self._resolve_enabled_toolsets_for_source(user_config, source, platform_key)
         disabled = parse_config_string_list((user_config.get("agent") or {}).get("disabled_toolsets")) or None
-        return enabled, disabled
+        from gateway.session_tool_policy import channel_toolsets
+        return channel_toolsets(self, user_config, source, platform_key, enabled, disabled)
 
     async def _run_background_task_inner(
         self, prompt: str, source: "SessionSource", task_id: str,
@@ -2252,7 +2253,8 @@ class GatewayTurnMixin:
                 response = repair_explicit_computer_use_media_paths(response, result.get("messages", []))
 
             preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
-            header = f'✅ Background task complete\nPrompt: "{preview}"\n\n'
+            status = "complete" if result.get("completed") else "paused or incomplete"
+            header = f'Background task {status}\nPrompt: "{preview}"\n\n'
             images, media_files, text_content = [], [], ""
             if response:
                 media_files, response = adapter.extract_media(response)

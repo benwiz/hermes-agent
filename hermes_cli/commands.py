@@ -207,6 +207,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                busy_policy="dispatch", desktop="terminal"),
 
     # Tools & Skills
+    CommandDef("mode", "Show or rotate the session capability tier", "Tools & Skills",
+               gateway_only=True, args_hint="[tier]"),
     CommandDef("tools", "Manage tools: /tools [list|disable|enable] [name...]", "Tools & Skills",
                args_hint="[list|disable|enable] [name...]", cli_only=True, argument_mode="options"),
     CommandDef("toolsets", "List available toolsets", "Tools & Skills",

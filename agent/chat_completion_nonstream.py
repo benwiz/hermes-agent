@@ -275,7 +275,8 @@ class _NonStreamRequest:
             if elapsed > wd.stale_timeout:
                 self._stale_kill(elapsed)
                 break
-            if agent._interrupt_requested:
+            from agent.efficiency import deadline_expired
+            if agent._interrupt_requested or deadline_expired(agent):
                 self._interrupt(elapsed)
         if self.result["error"] is not None:
             raise self.result["error"]

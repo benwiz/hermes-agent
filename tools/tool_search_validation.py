@@ -88,6 +88,9 @@ def validate_deferred_call_args(name: str, args: Dict[str, Any]) -> Optional[str
         if not isinstance(schema, dict):
             return None
         fn = schema.get("function") if schema.get("type") == "function" else schema
+        if isinstance(fn, dict):
+            from agent.tool_efficiency import annotate_schemas
+            fn = annotate_schemas([{"type": "function", "function": fn}])[0]["function"]
         params = fn.get("parameters") if isinstance(fn, dict) else None
         if not isinstance(params, dict):
             return None

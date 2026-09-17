@@ -333,6 +333,24 @@ class ChannelOverride:
     provider: Optional[str] = None
     system_prompt: Optional[str] = None
 
+    tier: Optional[str] = None
+    allowed_tiers: Optional[List[str]] = None
+    model_candidates: Optional[List[str]] = None
+    efficiency: Optional[Dict[str, Any]] = None
+    toolsets: Optional[List[str]] = None
+    disabled_toolsets: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.efficiency is not None:
+            from agent.efficiency import settings
+            settings({"agent": {"efficiency": self.efficiency}})
+        for name in ("toolsets", "disabled_toolsets", "model_candidates", "allowed_tiers"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, list) or any(
+                not isinstance(item, str) or not item.strip() for item in value
+            )):
+                raise ValueError(f"channel override {name} must be a list of nonempty names")
+
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
 

@@ -1053,10 +1053,22 @@ class TurnRunner:
         hits) or build a fresh one. Returns (agent, reused_cached_agent)."""
         ctx = self._ctx
         runner = self._runner
+        from gateway.session_tool_policy import pin_session_policy
+        from gateway.session_routing import resolve_policy, pin_model_route
+        policy, tier = resolve_policy(runner, ctx.user_config, ctx.source)
+        routed = policy is not None and (policy.toolsets is not None or policy.model_candidates is not None)
+        route_reason = "configured_route"
+        if routed:
+            ctx.enabled_toolsets, ctx.disabled_toolsets = pin_session_policy(
+                runner.session_store, ctx.session_key, ctx.session_id,
+                ctx.enabled_toolsets, ctx.disabled_toolsets,
+            )
+            route_reason = pin_model_route(runner.session_store, ctx.session_key, ctx.session_id, turn_route, policy)
         skip_context_files = self._skip_context_files(platform_key)
         sig = runner._agent_config_signature(
             turn_route["model"], turn_route["runtime"], ctx.enabled_toolsets, combined_ephemeral,
-            cache_keys=runner._extract_cache_busting_config(ctx.user_config),
+            cache_keys={**runner._extract_cache_busting_config(ctx.user_config),
+                        "session_disabled_toolsets": ctx.disabled_toolsets},
             user_id=getattr(ctx.source, "user_id", None),
             user_id_alt=getattr(ctx.source, "user_id_alt", None),
             skip_context_files=skip_context_files,
@@ -1085,6 +1097,15 @@ class TurnRunner:
                     cache[ctx.session_key] = (agent, sig, msg_count, ctx.session_id)
                     runner._enforce_agent_cache_cap()
             logger.debug("Created new agent for session %s (sig=%s)", ctx.session_key, sig)
+        from gateway.session_tool_policy import channel_efficiency, pin_efficiency
+        agent._efficiency_settings = pin_efficiency(
+            runner.session_store, ctx.session_key, ctx.session_id,
+            channel_efficiency(runner, ctx.user_config, ctx.source),
+        )
+        from gateway.session_routing import pin_schema
+        if routed:
+            pin_schema(runner.session_store, ctx.session_key, ctx.session_id, agent)
+        agent._efficiency_route = {"tier": tier, "selection_reason": route_reason}
         return agent, found.reused
 
     # ── per-turn agent wiring ───────────────────────────────────────────────────────────────

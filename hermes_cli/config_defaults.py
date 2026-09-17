@@ -47,6 +47,12 @@ DEFAULT_CONFIG = {
         "terminal_continue": True,
     },
     "agent": {
+        "efficiency": {
+            "receipts": False,
+            "max_model_calls": None,
+            "checkpoint_model_calls": None,
+            "max_seconds": None,
+        },
         # Turn cap. null = unlimited (default; caps caused silent mid-task truncation). Positive int
         # caps; "none"/"unlimited"/"inf"/0/-1 also mean unlimited (resolve_turn_limit).
         "max_turns": None,

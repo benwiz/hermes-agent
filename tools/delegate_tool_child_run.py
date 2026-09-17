@@ -645,7 +645,15 @@ class _ChildRun:
         from tools.delegate_tool import (_get_child_timeout, _get_subagent_approval_callback, _set_subagent_approval_cb)
         from tools.daemon_pool import DaemonThreadPoolExecutor
         child, task_index = self.child, self.task_index
+        from agent.efficiency import TurnEfficiency
+        parent_state = getattr(self.parent_agent, "_efficiency_turn", None)
+        if isinstance(parent_state, TurnEfficiency):
+            child._efficiency_parent_budget = getattr(self.parent_agent, "_efficiency_parent_budget", None) or parent_state
+            child._efficiency_parent_settings = getattr(self.parent_agent, "_efficiency_parent_settings", None) or self.parent_agent._efficiency_settings
         child_timeout = _get_child_timeout()
+        if isinstance(parent_state, TurnEfficiency) and parent_state.deadline is not None:
+            remaining = max(0.001, parent_state.deadline - time.monotonic())
+            child_timeout = min(child_timeout, remaining) if child_timeout else remaining
         executor = DaemonThreadPoolExecutor(
             max_workers=1, initializer=_set_subagent_approval_cb, initargs=(_get_subagent_approval_callback(),),
         )

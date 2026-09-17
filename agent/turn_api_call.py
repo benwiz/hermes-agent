@@ -80,11 +80,13 @@ def perform_api_call(
     _use_streaming = _should_stream(agent)
 
     def _perform_api_call(next_api_kwargs):
+        from agent.efficiency import admit_request
         if agent.api_mode == "codex_responses":
             next_api_kwargs = agent._get_transport().preflight_kwargs(
                 next_api_kwargs, allow_stream=False, is_github_responses=agent._is_copilot_url(),
                 sanitize_harmony_tokens=agent._is_codex_backend(),
             )
+        admit_request(agent, next_api_kwargs.get("tools"))
         if _use_streaming:
             return agent._interruptible_streaming_api_call(
                 next_api_kwargs, on_first_delta=_stop_spinner
@@ -177,6 +179,13 @@ def handle_api_interrupt(
     if agent._has_pending_redirect() and agent.clear_interrupt(preserve_redirect=True):
         _retry.restart_with_redirected_messages = True
         return ApiInterruptVerdict("break", thinking_spinner, interrupted, final_response)
+    state = getattr(agent, "_efficiency_turn", None)
+    from agent.efficiency import TurnEfficiency
+    if isinstance(state, TurnEfficiency) and state.stop_reason:
+        final_response = ("Paused at the configured efficiency budget. Progress is saved; "
+                          "send continue to authorize another bounded turn. Work may be incomplete.")
+        agent._persist_session(messages, conversation_history)
+        return ApiInterruptVerdict("break", thinking_spinner, True, final_response)
     api_elapsed = time.time() - api_start_time
     agent._vprint(f"{agent.log_prefix}⚡ Interrupted during API call.", force=True)
     interrupted = True

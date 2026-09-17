@@ -2294,6 +2294,8 @@ def init_agent(
     _apply_display_config(agent, _agent_cfg, platform)
     _init_memory(agent, _agent_cfg, skip_memory, platform)
     _apply_agent_section(agent, _agent_cfg)
+    from agent.efficiency import settings as efficiency_settings
+    agent._efficiency_settings = efficiency_settings(_agent_cfg)
     cs = _parse_compression_config(agent, _agent_cfg)
     _config_context_length, _custom_providers, _effective_context_length, _model_cfg = _resolve_context_length(
         agent, _agent_cfg, base_url

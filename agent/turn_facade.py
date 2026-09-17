@@ -139,6 +139,8 @@ class TurnFacadeMixin:
                         turn_author=turn_author,
                     )
                 finally:
+                    from agent.efficiency import stop_watchdog
+                    stop_watchdog(self)
                     # Post-loop relay/task finalization must not receive a late refresh interrupt;
                     # the interrupt clear itself waits for the thread join in the outer finally.
                     if lease is not None:

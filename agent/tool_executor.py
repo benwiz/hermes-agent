@@ -332,6 +332,9 @@ def _tool_search_scoped_names(agent) -> frozenset:
     """Deferrable tool names the session may invoke via ``tool_call``; the unwrap bypasses
     the bridge's scope check in ``model_tools.handle_function_call``, so restricted sessions
     validate against this set. Cached on the agent, keyed by registry scope/generation."""
+    frozen = getattr(agent, "_session_deferred_names", None)
+    if isinstance(frozen, frozenset):
+        return frozen
     try:
         import model_tools
         from tools import tool_search as _ts
@@ -666,6 +669,19 @@ def _dispatch_authorized_once(
         block_message, ref.args = resolve() if authorization_gate is None else authorization_gate.run(resolve)
         state.args = ref.args
 
+    if block_message is None:
+        from agent.efficiency import deadline_expired
+        if deadline_expired(agent):
+            block_message = "Wall-time budget exhausted; no further tool actions are authorized this turn."
+            block_error_type = "wall_time_budget"
+    if block_message is None:
+        from agent.tool_efficiency import consume_escalation
+        ref.args = dict(ref.args)
+        state.args = ref.args
+        block_message = consume_escalation(agent, ref.name, ref.args)
+        if block_message:
+            block_error_type = "escalation_reason_required"
+
     guardrail_decision = None
     if block_message is None:
         guardrail_decision = agent._tool_guardrails.before_call(ref.name, ref.args)
@@ -985,6 +1001,8 @@ def _commit_tool_result(
     pre-persist content for UI previews) or ``None`` when the flush failed (stop the batch).
     """
     function_name, function_args, tool_call_id, effective_task_id = ref.name, ref.args, ref.call_id, ref.task_id
+    from agent.efficiency import record_tool
+    record_tool(agent, function_name, blocked=blocked)
     if observed:
         if not blocked:
             function_result = agent._append_guardrail_observation(

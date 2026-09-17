@@ -74,7 +74,8 @@ class StreamingWaitMonitor:
             if _stale_elapsed > self._stream_stale_timeout:
                 self._mon.wait_notice_started_ts = None  # Reconnect status has its own owner.
                 self._kill_stale_stream(_stale_elapsed)
-            if self.agent._interrupt_requested:
+            from agent.efficiency import deadline_expired
+            if self.agent._interrupt_requested or deadline_expired(self.agent):
                 self._abort_for_interrupt(_stale_elapsed)
                 return
 

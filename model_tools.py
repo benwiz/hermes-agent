@@ -496,6 +496,8 @@ def _compute_tool_definitions(enabled_toolsets: Optional[List[str]] = None, disa
     from tools.kanban_toolset_context import scoped_kanban_toolset_selection
     with scoped_kanban_toolset_selection(enabled_toolsets):
         filtered_tools = _apply_dynamic_schemas(registry.get_definitions(tools_to_include, quiet=quiet_mode))
+    from agent.tool_efficiency import annotate_schemas
+    filtered_tools = annotate_schemas(filtered_tools)
     global _last_resolved_tool_names
     _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
 

@@ -441,6 +441,16 @@ def finalize_turn(
     """Run the post-loop finalization and return the turn ``result`` dict."""
     from agent.conversation_loop import logger
 
+    from agent.efficiency import TurnEfficiency, stop_watchdog
+    stop_watchdog(agent)
+    efficiency_state = getattr(agent, "_efficiency_turn", None)
+    if not isinstance(efficiency_state, TurnEfficiency):
+        efficiency_state = None
+    if efficiency_state is not None and efficiency_state.stop_reason:
+        _turn_exit_reason = efficiency_state.stop_reason
+        final_response = ("Paused at the configured efficiency budget. Progress is saved; "
+                          "send continue to authorize another bounded turn. Work may be incomplete.")
+
     final_response, _turn_exit_reason, preserved_verification_fallback = _resolve_budget_fallback(
         agent, final_response=final_response, api_call_count=api_call_count,
         interrupted=interrupted, failed=failed, messages=messages,
@@ -453,6 +463,7 @@ def finalize_turn(
     completed = (
         final_response is not None
         and not failed
+        and not (efficiency_state is not None and efficiency_state.stop_reason)
         and (api_call_count < agent.max_iterations or str(_turn_exit_reason).startswith("text_response("))
     )
 
@@ -622,6 +633,10 @@ def finalize_turn(
                 review_skills=_should_review_skills,
             )
 
+    from agent.efficiency import finish_turn
+    _guarded_cleanup("efficiency_receipt", lambda: finish_turn(agent, result, turn_id),
+                     _cleanup_errors, logger)
+
     # Memory provider on_session_end()/shutdown_all() are NOT called here:
     # run_conversation() runs once per message; CLI/gateway own session-end cleanup.
     if not getattr(agent, "_persist_disabled", False):
@@ -634,6 +649,7 @@ def finalize_turn(
             failed=failed,
             interrupted=interrupted,
             turn_exit_reason=_turn_exit_reason,
+            efficiency=result.get("efficiency"),
             model=agent.model,
             platform=_platform,
         )

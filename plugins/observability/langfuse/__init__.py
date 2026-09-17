@@ -120,7 +120,9 @@ def _capture_mode() -> str:
     can flip modes. Invalid values warn once and fall back to the default (never
     capture more than the operator intended)."""
     global _warned_invalid_capture
-    value = _env("HERMES_LANGFUSE_CAPTURE").lower()
+    from .budget import capture_mode
+    from hermes_constants import get_hermes_home
+    value = capture_mode(str(get_hermes_home())) or _env("HERMES_LANGFUSE_CAPTURE").lower()
     if not value or value in _CAPTURE_MODES:
         return value or _DEFAULT_CAPTURE_MODE
     if not _warned_invalid_capture:
@@ -140,7 +142,7 @@ def _redact_secrets(value: str) -> str:
         from agent.redact import redact_sensitive_text
         return redact_sensitive_text(value, force=True)
     except Exception:
-        return value
+        return "[redaction unavailable]"
 
 
 # (types, shape builder) for _describe_content; first match wins (bool handled before).
@@ -274,7 +276,9 @@ def _build_client() -> Optional[Langfuse]:
         value = _secret(f"HERMES_LANGFUSE_{name}") or _secret(f"LANGFUSE_{name}") or default
         if value:
             kwargs[key] = value
-    sample_rate = _secret("HERMES_LANGFUSE_SAMPLE_RATE")
+    from .budget import configured_rate
+    local_rate = configured_rate()
+    sample_rate = "1" if local_rate is not None else _secret("HERMES_LANGFUSE_SAMPLE_RATE")
     if sample_rate:
         try:
             kwargs["sample_rate"] = float(sample_rate)
@@ -585,6 +589,9 @@ def _start_root_trace(task_key: str, *, task_id: str, session_id: str, platform:
 def _start_child_observation(state: TraceState, *, name: str, as_type: str, input_value: Any,
                              metadata: Optional[dict] = None, model: Optional[str] = None,
                              model_parameters: Optional[dict] = None) -> Any:
+    from .budget import reserve_observation
+    if not reserve_observation():
+        return None
     return state.root_span.start_observation(name=name, as_type=as_type, input=input_value, metadata=metadata or {},
                                              model=model, model_parameters=model_parameters)
 
@@ -681,6 +688,9 @@ def _request_key(api_call_count: Any) -> str:
 
 def _client_and_key(task_id: str, session_id: str, turn_id: str, api_request_id: str) -> tuple[Any, str]:
     """(client, trace key) for a hook; client is None when tracing is unavailable."""
+    from .budget import sampled
+    if not sampled(session_id or task_id or turn_id or api_request_id):
+        return None, ""
     client = _get_langfuse()
     if client is None:
         return None, ""
@@ -704,6 +714,9 @@ def _get_or_start_state_locked(task_key: str, **root_kwargs: Any) -> TraceState:
     roots are ended so they don't dangle on the Langfuse side)."""
     state = _TRACE_STATE.get(task_key)
     if state is None:
+        from .budget import reserve_observation
+        if not reserve_observation():
+            return None
         state = _start_root_trace(task_key, **root_kwargs)
         over = len(_TRACE_STATE) - (_MAX_TRACE_STATE - 1)
         for key, stale in sorted(_TRACE_STATE.items(), key=lambda kv: kv[1].last_updated_at)[:max(over, 0)]:
@@ -790,6 +803,8 @@ def on_pre_llm_request(*, task_id: str = "", session_id: str = "", platform: str
         state = _get_or_start_state_locked(
             task_key, task_id=task_id, session_id=session_id, platform=platform, provider=provider, model=model,
             api_mode=api_mode, messages=input_messages, client=client, turn_id=turn_id, api_request_id=api_request_id)
+        if state is None:
+            return
         previous = state.generations.pop(req_key, None)
         if previous is not None:
             _end_observation(previous)
@@ -853,7 +868,7 @@ def on_post_llm_call(*, task_id: str = "", session_id: str = "", provider: str =
     _end_observation(generation, output=output, usage_details=usage_details, cost_details=cost_details, metadata=gen_metadata)
 
     has_tools = bool(getattr(assistant_message, "tool_calls", None)) if assistant_message else assistant_tool_call_count > 0
-    if not has_tools and output.get("content"):
+    if not turn_id and not has_tools and output.get("content"):
         _finish_trace(task_key, output=output)
 
 
@@ -946,7 +961,7 @@ def on_api_request_error(*, task_id: str = "", session_id: str = "", api_call_co
         state.last_updated_at = time.time()
 
 
-def on_session_finalize(*, session_id: str = "", reason: str = "", **_: Any) -> None:
+def on_session_finalize(*, session_id: str = "", reason: str = "", efficiency: Any = None, **_: Any) -> None:
     """Session-end boundary: close still-open traces and flush. A turn ending on a
     tool-only or empty final response never reaches ``_finish_trace``; its root
     would dangle until eviction and queued events could be lost on exit."""
@@ -961,6 +976,16 @@ def on_session_finalize(*, session_id: str = "", reason: str = "", **_: Any) -> 
     with _STATE_LOCK:
         keys = [k for k in _TRACE_STATE if not session_id or k == session_id or any(f in k for f in fragments)]
     for key in keys:
+        if isinstance(efficiency, dict):
+            # Explicit field projection: never forward arbitrary caller content to telemetry.
+            fields = ("model_calls", "tool_calls", "tokens", "elapsed_seconds", "stop_reason",
+                      "completed", "failed", "escalation_reasons", "toolset_signature", "route")
+            receipt = {k: efficiency[k] for k in fields if k in efficiency}
+            with _STATE_LOCK:
+                state = _TRACE_STATE.get(key)
+                if state is not None:
+                    with _failsafe("efficiency metadata"):
+                        state.root_span.update(metadata={"efficiency": _safe_value(receipt)})
         _finish_trace(key)
     with _failsafe("finalize flush"):
         client.flush()
