@@ -71,6 +71,41 @@ async def test_lifecycle_lease_restart_and_handoff(modes):
 
 
 @pytest.mark.asyncio
+async def test_off_tier_pins_default_heavy_session_to_coding(modes, tmp_path):
+    runner, source = modes
+    config = {'session_routing': {'discord': {'default': 'heavy', 'off_tier': 'coding', 'tiers': {
+        'coding': {'toolsets': ['file']}, 'heavy': {'toolsets': ['file', 'terminal', 'browser']}}}}}
+    (tmp_path / 'config.yaml').write_text(yaml.safe_dump(config))
+    runner.config = GatewayConfig.from_dict(config)
+
+    result = await handle_mode(runner, MessageEvent('/mode status', source=source))
+    assert '/mode off starts coding' in result
+    result = await handle_mode(runner, MessageEvent('/mode off', source=source))
+
+    assert 'new coding session' in result
+    entry = runner.session_store.get_or_create_session(source)
+    saved = runner.session_store.get_session_metadata(entry.session_key, 'session_mode')
+    assert saved == {'session_id': entry.session_id, 'tier': 'coding', 'expires_at': None}
+    from gateway.session_routing import resolve_policy
+    from hermes_cli.config import load_config
+    assert resolve_policy(runner, load_config(), source)[1] == 'coding'
+
+
+@pytest.mark.asyncio
+async def test_off_without_off_tier_restores_channel_policy(modes):
+    runner, source = modes
+    from gateway.session_routing import resolve_policy
+    from hermes_cli.config import load_config
+
+    await handle_mode(runner, MessageEvent('/mode heavy', source=source))
+    await handle_mode(runner, MessageEvent('/mode off', source=source))
+
+    assert resolve_policy(runner, load_config(), source)[1] == 'coding'
+    assert runner.session_store.get_session_metadata(
+        runner._session_key_for_source(source), 'session_mode') is None
+
+
+@pytest.mark.asyncio
 async def test_invalid_status_and_old_alias_recovery(modes):
     runner, source = modes
     store = runner.session_store

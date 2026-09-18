@@ -135,8 +135,15 @@ async def _handle_mode(runner, event):
             lease = f"; {max(0, int(mode['expires_at'] - time.time()))} seconds remaining"
         pending = f"; recovery pending before next turn: {reason}" if reason else ""
         allowed = explicit.allowed_tiers if explicit and explicit.allowed_tiers is not None else list(routing["tiers"])
-        return f"Mode: {current}{lease}{pending}. Available: {', '.join(allowed)}. /mode off restores {default_tier}."
-    target = None if requested in {"off", "default"} else requested
+        off_tier = routing.get("off_tier") or (
+            "off" if "off" in routing.get("tiers", {}) else None
+        )
+        off_action = f"starts {off_tier}" if off_tier else f"restores {default_tier}"
+        return f"Mode: {current}{lease}{pending}. Available: {', '.join(allowed)}. /mode off {off_action}."
+    off_tier = routing.get("off_tier") or (
+        "off" if "off" in routing.get("tiers", {}) else None
+    )
+    target = off_tier if requested == "off" else (None if requested == "default" else requested)
     if target is not None:
         if target not in routing["tiers"]:
             return "Unknown mode. Available: " + ", ".join(routing["tiers"]) + ", off, status."

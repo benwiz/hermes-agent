@@ -21,18 +21,17 @@ def annotate_schemas(schemas):
             result.append(schema)
             continue
         fn["description"] = fn.get("description", "") + (
-            " Prefer available domain APIs for Home/media actions, file/search/terminal tools for local work, "
-            "and public search/extraction for documents. Use a browser only for interaction, authentication, "
-            "JavaScript-only data or visual verification; use computer control only for desktop-only work "
-            "or unavailable structured/browser paths. Record the prerequisite in escalation_reason."
+            " Use this heavy tool judiciously: prefer available domain APIs for Home/media actions, "
+            "file/search/terminal tools for local work, and public search/extraction for documents. "
+            "Use a browser only when interaction, authentication, JavaScript-only data, or visual verification "
+            "is actually required; use computer control only for desktop-only work or when structured tools "
+            "cannot complete the task. Heavy tools are available when useful; this guidance is not an availability gate."
         )
         params = fn.setdefault("parameters", {"type": "object"})
         params.setdefault("properties", {})["escalation_reason"] = {
             "type": "string", "enum": sorted(allowed_reasons(name)),
             "description": "Why structured tools cannot complete this step; no page content or secrets.",
         }
-        if "escalation_reason" not in params.setdefault("required", []):
-            params["required"].append("escalation_reason")
         result.append(schema)
     return result
 
@@ -42,6 +41,11 @@ def consume_escalation(agent, name, args):
     if not escalation_tool(name):
         return None
     reason = args.pop("escalation_reason", None)
+    # Escalation metadata is useful for receipts, but heavy tools are not
+    # availability-gated.  The model-facing description provides judgment
+    # guidance; omitting this optional field must not block a valid call.
+    if reason is None:
+        return None
     allowed = allowed_reasons(name)
     if not isinstance(reason, str) or reason not in allowed:
         return "Provide a valid escalation_reason explaining why structured tools cannot complete this step."
