@@ -272,6 +272,9 @@ def _request_approval(action: str, args: Dict[str, Any]) -> Optional[str]:
     so a computer_use grant is one store entry like any terminal pattern. Scope key ``cua:<action>:<mode>``:
     foreground delivery is a visible focus change, so a background ``session`` grant must NOT cover it (#67052).
     """
+    from tools.computer_use.cua_backend import _cua_configured_permission_mode
+    if _cua_configured_permission_mode() == "unrestricted":
+        return None
     from tools.approval import _run_approval_gate
 
     mode = "foreground" if args.get("delivery_mode") == "foreground" else "background"

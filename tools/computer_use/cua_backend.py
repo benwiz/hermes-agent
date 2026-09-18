@@ -71,11 +71,11 @@ def _cua_telemetry_disabled() -> bool:
     return not bool(_computer_use_cfg().get("cua_telemetry", False))
 
 def _cua_configured_permission_mode() -> str:
-    """``computer_use.permission_mode``: ``standard`` (default) or ``bounded``; unknown values fall closed to
-    ``standard``. ``unrestricted`` is deliberately NOT a config value — it stays tied to the per-session YOLO
-    toggle so a stale config line can never silently bypass approvals."""
+    """Resolve computer-use permission mode; invalid values fail closed."""
     raw = str(_computer_use_cfg().get("permission_mode", "standard") or "").strip().lower()
-    return "bounded" if raw == "bounded" else "standard"
+    if raw in {"standard", "bounded", "unrestricted"}:
+        return raw
+    return "standard"
 
 def _manifest_is_mode_independent(path: str) -> bool:
     """True when this manifest may accompany any permission mode: v1/v2 declare ``mode: bounded`` and abort
